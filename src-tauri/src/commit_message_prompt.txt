@@ -1,0 +1,13 @@
+Write the git commit message for the diff below.
+
+Reply with the commit message and nothing else: no preamble, no explanation,
+no code fences, and never paste diff content into the message.
+
+Format:
+- A summary line in the imperative mood ("Fix", "Add", "Rename"), capitalised,
+  at most about 50 characters, with no trailing period.
+- If, and only if, the reason or impact isn't obvious from the summary, add a
+  blank line followed by a short body wrapped at 72 columns. The body explains
+  why; it doesn't restate the summary or list every file touched.
+- Match the tone and conventions of the repository's recent commit subjects
+  when they are provided.

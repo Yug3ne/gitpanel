@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Open Git Panel on the project of the focused window:
+#   - Zed: its window title is the project name, which gitpanel resolves
+#     against the repositories it discovers under $HOME.
+#   - Terminals: the shell's working directory (any subfolder of a repo works).
+# If gitpanel is already running it switches that window instead of opening another.
+set -uo pipefail
+
+win=$(hyprctl activewindow -j 2>/dev/null || echo '{}')
+class=$(jq -r '.class // ""' <<<"$win")
+title=$(jq -r '.title // ""' <<<"$win")
+
+case "$class" in
+  gitpanel) target="" ;;
+  dev.zed.Zed*) target="${title%% — *}" ;;
+  *) target=$(omarchy-cmd-terminal-cwd 2>/dev/null || echo "$HOME") ;;
+esac
+
+if pgrep -x gitpanel >/dev/null; then
+  [[ -n $target ]] && "$HOME/.local/bin/gitpanel" "$target"
+  hyprctl dispatch 'hl.dsp.focus({ window = "class:^(gitpanel)$" })' >/dev/null
+else
+  setsid -f "$HOME/.local/bin/gitpanel" ${target:+"$target"} >/dev/null 2>&1
+fi

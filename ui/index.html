@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Git Panel</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="welcome" hidden>
+    <div class="welcome-inner">
+      <div class="welcome-title">Git Panel</div>
+      <div class="welcome-sub">Open a repository to start committing.</div>
+      <button class="btn primary" id="welcome-project">Open Project… <kbd>Ctrl P</kbd></button>
+      <button class="btn" id="welcome-open">Open Folder… <kbd>Ctrl O</kbd></button>
+      <div id="recent-list"></div>
+    </div>
+  </div>
+
+  <div id="app" hidden>
+    <aside id="panel">
+      <div class="tabs">
+        <button class="tab active" data-tab="changes">Changes <span id="change-count"></span></button>
+        <button class="tab" data-tab="history">History</button>
+      </div>
+
+      <section id="changes-view" class="view">
+        <div class="toolbar">
+          <button class="ghost" id="view-diff" title="View all changes">
+            <span class="ico" data-icon="diff"></span> View Diff
+            <span class="add" id="total-add"></span><span class="del" id="total-del"></span>
+          </button>
+          <span class="spacer"></span>
+          <div class="split">
+            <button class="btn" id="stage-all">Stage All</button>
+            <button class="btn caret" data-menu="stage"><span class="ico" data-icon="chevron-down"></span></button>
+          </div>
+        </div>
+        <div id="banner" hidden></div>
+        <div id="file-list" tabindex="0"></div>
+      </section>
+
+      <section id="history-view" class="view" hidden>
+        <div id="commit-list" tabindex="0"></div>
+      </section>
+
+      <footer>
+        <div class="row branch-row">
+          <button class="ghost" id="repo-btn" title="Switch project (Ctrl P)"></button>
+          <span class="sep">/</span>
+          <button class="ghost" id="branch-btn" title="Switch branch (Ctrl B)">
+            <span class="ico" data-icon="branch"></span><span id="branch-name"></span>
+          </button>
+          <span class="spacer"></span>
+          <div class="split" id="remote-split">
+            <button class="btn" id="remote-btn"></button>
+            <button class="btn caret" data-menu="remote"><span class="ico" data-icon="chevron-down"></span></button>
+          </div>
+        </div>
+        <div class="editor">
+          <textarea id="msg" placeholder="Enter commit message" spellcheck="true"></textarea>
+        </div>
+        <div class="row commit-row">
+          <button class="icon-btn" id="generate" title="Generate commit message (Ctrl G)"><span class="ico" data-icon="sparkle"></span></button>
+          <span id="amend-tag" hidden>Amending <button class="link" id="amend-cancel">cancel</button></span>
+          <span class="spacer"></span>
+          <div class="split">
+            <button class="btn" id="commit-btn" title="Ctrl Enter">Commit</button>
+            <button class="btn caret" data-menu="commit"><span class="ico" data-icon="chevron-down"></span></button>
+          </div>
+        </div>
+        <div class="row last-commit" id="last-commit">
+          <span id="last-commit-text"></span>
+          <span class="spacer"></span>
+          <button class="icon-btn" id="uncommit" title="Uncommit (soft reset HEAD~1)"><span class="ico" data-icon="undo"></span></button>
+        </div>
+      </footer>
+    </aside>
+
+    <main id="diff-pane" hidden>
+      <div class="diff-header">
+        <button class="icon-btn" id="diff-close" title="Close (Esc)"><span class="ico" data-icon="x"></span></button>
+        <span id="diff-title"></span>
+      </div>
+      <div id="diff-body"></div>
+    </main>
+  </div>
+
+  <div id="menu" class="menu" hidden></div>
+  <div id="modal-backdrop" hidden><div id="modal"></div></div>
+  <div id="toasts"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
