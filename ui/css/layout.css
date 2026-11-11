@@ -1,0 +1,50 @@
+/* Panel / diff pane layout, tabs and the toolbar under them. */
+
+#app { display: flex; height: 100vh; }
+#panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+}
+#app.with-diff #panel { width: 380px; flex: none; border-right: 1px solid var(--border); }
+#diff-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+/* Narrow window: diff takes over the whole window. */
+@media (max-width: 760px) {
+  #app.with-diff #panel { display: none; }
+}
+
+.tabs { display: flex; border-bottom: 1px solid var(--border); flex: none; }
+.tab {
+  flex: 1;
+  height: 36px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text-bright); background: var(--bg-elev); }
+.tab + .tab { border-left: 1px solid var(--border); }
+#change-count { color: var(--muted); }
+
+.view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 4px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+#view-diff .add { margin-left: 2px; }
+#view-diff .del { margin-left: 4px; }
+
+#banner {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--orange);
+  border-bottom: 1px solid var(--border);
+}
