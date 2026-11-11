@@ -15,6 +15,16 @@ const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
 const MAX_PROMPT_DIFF_BYTES: usize = 60 * 1024;
 /// Instructions for generating a commit message from a diff.
 const COMMIT_PROMPT: &str = include_str!("commit_message_prompt.txt");
+/// Instructions for drafting a pull request title and description.
+const PR_PROMPT: &str = include_str!("pr_message_prompt.txt");
+/// Where repositories commonly keep their pull request template.
+const PR_TEMPLATES: &[&str] = &[
+    ".github/pull_request_template.md",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    "pull_request_template.md",
+    "PULL_REQUEST_TEMPLATE.md",
+    "docs/pull_request_template.md",
+];
 
 /// Untracked files larger than this don't get a line count.
 const MAX_COUNT_BYTES: u64 = 4 * 1024 * 1024;
@@ -148,6 +158,23 @@ pub struct Commit {
     refs: String,
 }
 
+/// What the "New Pull Request" form needs to know about the current branch.
+#[derive(Serialize)]
+pub struct PrContext {
+    branch: String,
+    base: String,
+    /// Subjects of the commits the pull request would contain.
+    commits: Vec<String>,
+    /// The branch has commits the remote doesn't (or isn't published at all).
+    needs_push: bool,
+}
+
+#[derive(Serialize)]
+pub struct PrDraft {
+    title: String,
+    body: String,
+}
+
 #[derive(Serialize)]
 pub struct Branch {
     name: String,
@@ -185,31 +212,85 @@ fn output(mut cmd: Command, ok_codes: &[i32]) -> Res<String> {
     }
 }
 
-/// Locate the `claude` CLI. Desktop launchers often have a minimal PATH, so
-/// check the usual install locations too.
-fn claude_bin() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("GITPANEL_CLAUDE") {
+/// Locate a CLI (`claude`, `gh`). Desktop launchers often have a minimal
+/// PATH, so check the usual install locations too. `env` overrides the lookup.
+fn find_bin(name: &str, env: &str) -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os(env) {
         return Some(PathBuf::from(p));
     }
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).map(|d| d.join("claude")).collect::<Vec<_>>())
+        .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
         .unwrap_or_default()
         .into_iter()
-        .chain([home.join(".local/bin/claude"), home.join(".claude/local/claude")])
+        .chain([home.join(".local/bin"), home.join(".claude/local")])
+        .chain(["/usr/local/bin", "/usr/bin", "/opt/homebrew/bin"].map(PathBuf::from))
+        .map(|d| d.join(name))
         .find(|p| p.is_file())
 }
 
-fn truncate(mut s: String) -> String {
-    if s.len() > MAX_DIFF_BYTES {
-        let mut cut = MAX_DIFF_BYTES;
+/// Cut `s` down to at most `max` bytes (on a char boundary), appending `note`.
+fn clip(mut s: String, max: usize, note: &str) -> String {
+    if s.len() > max {
+        let mut cut = max;
         while !s.is_char_boundary(cut) {
             cut -= 1;
         }
         s.truncate(cut);
-        s.push_str("\n\n… diff truncated …\n");
+        s.push_str(note);
     }
     s
+}
+
+fn truncate(s: String) -> String {
+    clip(s, MAX_DIFF_BYTES, "\n\n… diff truncated …\n")
+}
+
+/// Run a one-shot prompt through the `claude` CLI (the user's own login and
+/// models) and return its reply. `model` is a `claude --model` alias.
+fn run_claude(dir: &str, model: &str, prompt: String) -> Res<String> {
+    if !["sonnet", "opus", "haiku"].contains(&model) {
+        return Err(format!("unknown model {model:?}"));
+    }
+    let claude = find_bin("claude", "GITPANEL_CLAUDE")
+        .ok_or("Couldn't find the `claude` CLI (set GITPANEL_CLAUDE to its path)")?;
+    // Headless and tool-less: no settings, plugins, hooks or MCP servers, nothing saved.
+    let mut child = Command::new(claude)
+        .args(["-p", "--model", model, "--tools", "", "--no-session-persistence"])
+        .args(["--strict-mcp-config", "--setting-sources", ""])
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to run claude: {e}"))?;
+    let mut stdin = child.stdin.take().ok_or("no stdin")?;
+    std::thread::spawn(move || {
+        let _ = stdin.write_all(prompt.as_bytes());
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        if child.try_wait().map_err(|e| e.to_string())?.is_some() {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            return Err("claude timed out".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !out.status.success() || text.is_empty() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if err.is_empty() { text } else { err });
+    }
+    // Drop a code fence if the model wrapped its whole answer in one.
+    let text = text
+        .strip_prefix("```")
+        .map(|t| t.trim_start_matches(|c: char| c != '\n').trim_end_matches("```").trim())
+        .unwrap_or(&text);
+    Ok(text.to_string())
 }
 
 /// Line count of a text file, `None` for binaries / huge files.
@@ -581,13 +662,7 @@ impl Repo {
             "push" => c.args(["push"]),
             "force_push" => c.args(["push", "--force-with-lease"]),
             "publish" | "republish" => {
-                let remotes = self.run(&["remote"])?;
-                let remote = remotes
-                    .lines()
-                    .find(|r| *r == "origin")
-                    .or_else(|| remotes.lines().next())
-                    .ok_or("No remote configured")?
-                    .to_string();
+                let remote = self.default_remote()?;
                 c.args(["push", "-u", &remote, "HEAD"])
             }
             _ => return Err(format!("unknown remote op {op}")),
@@ -672,10 +747,9 @@ impl Repo {
 
     /// Draft a commit message with the `claude` CLI, from the staged diff or,
     /// when nothing is staged, all tracked changes (what Commit Tracked takes).
-    pub fn generate_commit_message(&self) -> Res<String> {
-        let claude = claude_bin().ok_or("Couldn't find the `claude` CLI (set GITPANEL_CLAUDE to its path)")?;
+    pub fn generate_commit_message(&self, model: &str) -> Res<String> {
         let staged = !self.run(&["diff", "--cached", "--name-only"])?.trim().is_empty();
-        let mut diff = if staged {
+        let diff = if staged {
             self.run(&["diff", "--cached", "--no-ext-diff"])?
         } else {
             self.run(&["diff", "--no-ext-diff", &self.base()?])?
@@ -683,56 +757,15 @@ impl Repo {
         if diff.trim().is_empty() {
             return Err("No tracked changes to describe".into());
         }
-        if diff.len() > MAX_PROMPT_DIFF_BYTES {
-            let mut cut = MAX_PROMPT_DIFF_BYTES;
-            while !diff.is_char_boundary(cut) {
-                cut -= 1;
-            }
-            diff.truncate(cut);
-            diff.push_str("\n[diff truncated]\n");
-        }
+        let diff = clip(diff, MAX_PROMPT_DIFF_BYTES, "\n[diff truncated]\n");
         let recent = self.run(&["log", "-10", "--format=%s"]).unwrap_or_default();
-        let prompt = format!(
-            "{COMMIT_PROMPT}\nRecent commit subjects in this repository, for style reference:\n{recent}\nHere are the changes in this commit:\n\n{diff}"
-        );
-
-        // Headless and tool-less: no settings, plugins, hooks or MCP servers, nothing saved.
-        let mut child = Command::new(claude)
-            .args(["-p", "--model", "haiku", "--tools", "", "--no-session-persistence"])
-            .args(["--strict-mcp-config", "--setting-sources", ""])
-            .current_dir(&self.root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("failed to run claude: {e}"))?;
-        let mut stdin = child.stdin.take().ok_or("no stdin")?;
-        std::thread::spawn(move || {
-            let _ = stdin.write_all(prompt.as_bytes());
-        });
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
-        loop {
-            if child.try_wait().map_err(|e| e.to_string())?.is_some() {
-                break;
-            }
-            if std::time::Instant::now() > deadline {
-                let _ = child.kill();
-                return Err("claude timed out".into());
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        let out = child.wait_with_output().map_err(|e| e.to_string())?;
-        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !out.status.success() || text.is_empty() {
-            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-            return Err(if err.is_empty() { text } else { err });
-        }
-        // Drop a code fence if the model wrapped its answer in one.
-        let text = text
-            .strip_prefix("```")
-            .map(|t| t.trim_start_matches(|c: char| c != '\n').trim_end_matches("```").trim())
-            .unwrap_or(&text);
-        Ok(text.to_string())
+        run_claude(
+            &self.root,
+            model,
+            format!(
+                "{COMMIT_PROMPT}\nRecent commit subjects in this repository, for style reference:\n{recent}\nHere are the changes in this commit:\n\n{diff}"
+            ),
+        )
     }
 
     pub fn branches(&self) -> Res<Vec<Branch>> {
@@ -765,5 +798,218 @@ impl Repo {
         } else {
             self.run(&["switch", name]).map(drop)
         }
+    }
+
+    // ------------------------------------------------------------ pull requests
+    //
+    // Everything here goes through the GitHub CLI, so it uses the account,
+    // host and credentials `gh` is already logged in with.
+
+    /// `origin`, or the first remote when there is no `origin`.
+    fn default_remote(&self) -> Res<String> {
+        let remotes = self.run(&["remote"])?;
+        remotes
+            .lines()
+            .find(|r| *r == "origin")
+            .or_else(|| remotes.lines().next())
+            .map(str::to_string)
+            .ok_or_else(|| "No remote configured".to_string())
+    }
+
+    fn gh(&self, args: &[&str], stdin: Option<&str>) -> Res<String> {
+        let bin = find_bin("gh", "GITPANEL_GH")
+            .ok_or("Couldn't find the GitHub CLI (`gh`). Install it and run `gh auth login`.")?;
+        let mut c = Command::new(bin);
+        c.args(args)
+            .current_dir(&self.root)
+            .env("GH_PROMPT_DISABLED", "1")
+            .env("GH_NO_UPDATE_NOTIFIER", "1")
+            .env("NO_COLOR", "1")
+            .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = c.spawn().map_err(|e| format!("failed to run gh: {e}"))?;
+        if let Some(input) = stdin {
+            // The handle is dropped (closed) at the end of this statement.
+            child
+                .stdin
+                .take()
+                .ok_or("no stdin")?
+                .write_all(input.as_bytes())
+                .map_err(|e| e.to_string())?;
+        }
+        let out = child.wait_with_output().map_err(|e| e.to_string())?;
+        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        if out.status.success() {
+            Ok(if stdout.is_empty() { stderr } else { stdout })
+        } else {
+            Err(if stderr.is_empty() { stdout } else { stderr })
+        }
+    }
+
+    fn gh_json(&self, args: &[&str]) -> Res<serde_json::Value> {
+        serde_json::from_str(&self.gh(args, None)?).map_err(|e| format!("unexpected gh output: {e}"))
+    }
+
+    /// Open pull requests, most recently updated first.
+    pub fn pr_list(&self) -> Res<serde_json::Value> {
+        self.gh_json(&[
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--limit",
+            "50",
+            "--json",
+            "number,title,headRefName,baseRefName,isDraft,author,updatedAt,url,reviewDecision,statusCheckRollup",
+        ])
+    }
+
+    pub fn pr_view(&self, number: u64) -> Res<serde_json::Value> {
+        self.gh_json(&[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "number,title,body,state,isDraft,headRefName,baseRefName,author,url,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,additions,deletions,changedFiles,commits",
+        ])
+    }
+
+    pub fn pr_diff(&self, number: u64) -> Res<String> {
+        self.gh(&["pr", "diff", &number.to_string()], None).map(truncate)
+    }
+
+    /// The remote's default branch: what a new pull request targets.
+    fn default_base(&self) -> String {
+        if let Ok(remote) = self.default_remote() {
+            let head = format!("refs/remotes/{remote}/HEAD");
+            if let Ok(r) = self.run(&["symbolic-ref", "--short", &head]) {
+                let r = r.trim();
+                return r.strip_prefix(&format!("{remote}/")).unwrap_or(r).to_string();
+            }
+        }
+        self.gh(&["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"], None)
+            .ok()
+            .filter(|b| !b.is_empty())
+            .unwrap_or_else(|| "main".into())
+    }
+
+    /// The ref to compare against for `base`: the remote's copy when there is
+    /// one (the local branch may be stale), else the local branch.
+    fn base_ref(&self, base: &str) -> Res<String> {
+        if base.starts_with('-') || base.trim().is_empty() {
+            return Err(format!("invalid base branch {base:?}"));
+        }
+        let remote = self.default_remote().unwrap_or_else(|_| "origin".into());
+        [format!("{remote}/{base}"), base.to_string()]
+            .into_iter()
+            .find(|r| self.run(&["rev-parse", "-q", "--verify", &format!("{r}^{{commit}}")]).is_ok())
+            .ok_or_else(|| format!("Base branch {base} not found"))
+    }
+
+    fn needs_push(&self) -> bool {
+        match self.run(&["rev-list", "--count", "@{upstream}..HEAD"]) {
+            Ok(n) => n.trim() != "0",
+            // No upstream, or it was deleted on the remote.
+            Err(_) => true,
+        }
+    }
+
+    pub fn pr_context(&self, base: Option<String>) -> Res<PrContext> {
+        let branch = self.run(&["branch", "--show-current"])?.trim().to_string();
+        if branch.is_empty() {
+            return Err("Check out a branch first (HEAD is detached)".into());
+        }
+        let base = base.filter(|b| !b.trim().is_empty()).unwrap_or_else(|| self.default_base());
+        let range = format!("{}..HEAD", self.base_ref(&base)?);
+        let commits = self
+            .run(&["log", "--format=%s", "-n200", &range])?
+            .lines()
+            .map(str::to_string)
+            .collect();
+        Ok(PrContext { branch, base, commits, needs_push: self.needs_push() })
+    }
+
+    /// Open a pull request for the current branch, pushing it first if the
+    /// remote doesn't have its commits yet. Returns the pull request's URL.
+    pub fn pr_create(&self, title: &str, body: &str, base: &str, draft: bool) -> Res<String> {
+        if title.trim().is_empty() {
+            return Err("A pull request needs a title".into());
+        }
+        self.base_ref(base)?;
+        if self.needs_push() {
+            self.remote("publish")?;
+        }
+        let mut args = vec!["pr", "create", "--title", title.trim(), "--body-file", "-", "--base", base];
+        if draft {
+            args.push("--draft");
+        }
+        let out = self.gh(&args, Some(body))?;
+        Ok(out.lines().rev().find(|l| l.starts_with("http")).unwrap_or(&out).to_string())
+    }
+
+    /// `method`: `merge` | `squash` | `rebase`
+    pub fn pr_merge(&self, number: u64, method: &str, delete_branch: bool) -> Res<String> {
+        let flag = match method {
+            "merge" => "--merge",
+            "squash" => "--squash",
+            "rebase" => "--rebase",
+            _ => return Err(format!("unknown merge method {method}")),
+        };
+        let number = number.to_string();
+        let mut args = vec!["pr", "merge", &number, flag];
+        if delete_branch {
+            args.push("--delete-branch");
+        }
+        self.gh(&args, None)
+    }
+
+    /// Mark a draft pull request as ready for review.
+    pub fn pr_ready(&self, number: u64) -> Res<String> {
+        self.gh(&["pr", "ready", &number.to_string()], None)
+    }
+
+    pub fn pr_checkout(&self, number: u64) -> Res<String> {
+        self.gh(&["pr", "checkout", &number.to_string()], None)
+    }
+
+    pub fn pr_open_web(&self, number: u64) -> Res<String> {
+        self.gh(&["pr", "view", &number.to_string(), "--web"], None)
+    }
+
+    /// Draft a pull request title and description with the `claude` CLI, from
+    /// the commits and diff between `base` and HEAD.
+    pub fn generate_pr(&self, base: &str, model: &str) -> Res<PrDraft> {
+        let base_ref = self.base_ref(base)?;
+        let commits = self.run(&["log", "--reverse", "--format=- %s%n%w(0,2,2)%b", &format!("{base_ref}..HEAD")])?;
+        if commits.trim().is_empty() {
+            return Err(format!("No commits ahead of {base} to describe"));
+        }
+        // Three dots: only what this branch changed since it forked from base.
+        let range = format!("{base_ref}...HEAD");
+        let stat = self.run(&["diff", "--stat", "--no-ext-diff", &range])?;
+        let diff = clip(self.run(&["diff", "--no-ext-diff", &range])?, MAX_PROMPT_DIFF_BYTES, "\n[diff truncated]\n");
+        let branch = self.run(&["branch", "--show-current"]).unwrap_or_default();
+        let template = PR_TEMPLATES
+            .iter()
+            .find_map(|t| std::fs::read_to_string(Path::new(&self.root).join(t)).ok())
+            .filter(|t| !t.trim().is_empty())
+            .map(|t| {
+                format!("\nThe repository has a pull request template. Fill it in for the description, keeping its headings:\n\n{t}\n")
+            })
+            .unwrap_or_default();
+        let text = run_claude(
+            &self.root,
+            model,
+            format!(
+                "{PR_PROMPT}{template}\nBranch: {} (into {base})\n\nCommits on this branch, oldest first:\n{commits}\nFiles changed:\n{stat}\nFull diff:\n\n{diff}",
+                branch.trim()
+            ),
+        )?;
+        let (title, body) = text.split_once('\n').unwrap_or((&text, ""));
+        let title = title.trim().trim_start_matches('#').trim();
+        let title = title.strip_prefix("Title:").unwrap_or(title).trim();
+        Ok(PrDraft { title: title.to_string(), body: body.trim().to_string() })
     }
 }

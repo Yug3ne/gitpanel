@@ -87,9 +87,24 @@ impl Server {
             "diff_file" => to(r.diff_file(&arg::<String>(a, "path")?, arg(a, "untracked")?)),
             "diff_all" => to(r.diff_all()),
             "show_commit" => to(r.show_commit(&arg::<String>(a, "hash")?)),
-            "generate_commit_message" => to(r.generate_commit_message()),
+            "generate_commit_message" => to(r.generate_commit_message(&arg::<String>(a, "model")?)),
             "branches" => to(r.branches()),
             "switch_branch" => to(r.switch_branch(&arg::<String>(a, "name")?, arg(a, "create")?)),
+            "pr_list" => to(r.pr_list()),
+            "pr_view" => to(r.pr_view(arg(a, "number")?)),
+            "pr_diff" => to(r.pr_diff(arg(a, "number")?)),
+            "pr_context" => to(r.pr_context(arg(a, "base")?)),
+            "pr_create" => to(r.pr_create(
+                &arg::<String>(a, "title")?,
+                &arg::<String>(a, "body")?,
+                &arg::<String>(a, "base")?,
+                arg(a, "draft")?,
+            )),
+            "pr_merge" => to(r.pr_merge(arg(a, "number")?, &arg::<String>(a, "method")?, arg(a, "delete")?)),
+            "pr_ready" => to(r.pr_ready(arg(a, "number")?)),
+            "pr_checkout" => to(r.pr_checkout(arg(a, "number")?)),
+            "pr_open_web" => to(r.pr_open_web(arg(a, "number")?)),
+            "generate_pr" => to(r.generate_pr(&arg::<String>(a, "base")?, &arg::<String>(a, "model")?)),
             _ => Err(format!("unknown command {cmd}")),
         }
     }
@@ -126,7 +141,7 @@ impl Server {
             match (rel.contains(".."), std::fs::read(&file)) {
                 (false, Ok(mut data)) => {
                     if rel == "index.html" {
-                        let html = String::from_utf8_lossy(&data).replace("<script src=\"app.js\">", &format!("{SHIM}<script src=\"app.js\">"));
+                        let html = String::from_utf8_lossy(&data).replace("<script type=\"module\"", &format!("{SHIM}<script type=\"module\""));
                         data = html.into_bytes();
                     }
                     let ctype = match file.extension().and_then(|e| e.to_str()) {

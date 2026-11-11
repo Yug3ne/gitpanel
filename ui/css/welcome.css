@@ -1,0 +1,8 @@
+/* Welcome screen. */
+
+#welcome { height: 100vh; display: flex; align-items: center; justify-content: center; }
+.welcome-inner { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px; width: 100%; max-width: 340px; }
+.welcome-title { font-size: 20px; color: var(--text-bright); }
+.welcome-sub { color: var(--muted); margin-bottom: 8px; }
+#recent-list { width: 100%; margin-top: 12px; }
+#recent-list .picker-item:hover { background: var(--bg-hover); }
