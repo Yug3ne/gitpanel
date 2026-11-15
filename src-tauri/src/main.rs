@@ -2,7 +2,8 @@
 
 mod git;
 
-use git::{Branch, Commit, CommitOptions, Repo, RepoEntry, Status};
+use git::{Branch, Commit, CommitOptions, PrContext, PrDraft, Repo, RepoEntry, Status};
+use serde_json::Value;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -147,8 +148,8 @@ fn show_commit(state: State<AppState>, hash: String) -> Res<String> {
 }
 
 #[tauri::command(async)]
-fn generate_commit_message(state: State<AppState>) -> Res<String> {
-    current(&state)?.generate_commit_message()
+fn generate_commit_message(state: State<AppState>, model: String) -> Res<String> {
+    current(&state)?.generate_commit_message(&model)
 }
 
 #[tauri::command(async)]
@@ -159,6 +160,56 @@ fn branches(state: State<AppState>) -> Res<Vec<Branch>> {
 #[tauri::command(async)]
 fn switch_branch(state: State<AppState>, name: String, create: bool) -> Res<()> {
     current(&state)?.switch_branch(&name, create)
+}
+
+#[tauri::command(async)]
+fn pr_list(state: State<AppState>) -> Res<Value> {
+    current(&state)?.pr_list()
+}
+
+#[tauri::command(async)]
+fn pr_view(state: State<AppState>, number: u64) -> Res<Value> {
+    current(&state)?.pr_view(number)
+}
+
+#[tauri::command(async)]
+fn pr_diff(state: State<AppState>, number: u64) -> Res<String> {
+    current(&state)?.pr_diff(number)
+}
+
+#[tauri::command(async)]
+fn pr_context(state: State<AppState>, base: Option<String>) -> Res<PrContext> {
+    current(&state)?.pr_context(base)
+}
+
+#[tauri::command(async)]
+fn pr_create(state: State<AppState>, title: String, body: String, base: String, draft: bool) -> Res<String> {
+    current(&state)?.pr_create(&title, &body, &base, draft)
+}
+
+#[tauri::command(async)]
+fn pr_merge(state: State<AppState>, number: u64, method: String, delete: bool) -> Res<String> {
+    current(&state)?.pr_merge(number, &method, delete)
+}
+
+#[tauri::command(async)]
+fn pr_ready(state: State<AppState>, number: u64) -> Res<String> {
+    current(&state)?.pr_ready(number)
+}
+
+#[tauri::command(async)]
+fn pr_checkout(state: State<AppState>, number: u64) -> Res<String> {
+    current(&state)?.pr_checkout(number)
+}
+
+#[tauri::command(async)]
+fn pr_open_web(state: State<AppState>, number: u64) -> Res<String> {
+    current(&state)?.pr_open_web(number)
+}
+
+#[tauri::command(async)]
+fn generate_pr(state: State<AppState>, base: String, model: String) -> Res<PrDraft> {
+    current(&state)?.generate_pr(&base, &model)
 }
 
 fn main() {
@@ -222,6 +273,16 @@ fn main() {
             branches,
             generate_commit_message,
             switch_branch,
+            pr_list,
+            pr_view,
+            pr_diff,
+            pr_context,
+            pr_create,
+            pr_merge,
+            pr_ready,
+            pr_checkout,
+            pr_open_web,
+            generate_pr,
         ])
         .run(tauri::generate_context!())
         .expect("error while running gitpanel");

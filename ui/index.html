@@ -4,7 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Git Panel</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+  <link rel="stylesheet" href="css/changes.css" />
+  <link rel="stylesheet" href="css/history.css" />
+  <link rel="stylesheet" href="css/footer.css" />
+  <link rel="stylesheet" href="css/diff.css" />
+  <link rel="stylesheet" href="css/overlays.css" />
+  <link rel="stylesheet" href="css/welcome.css" />
+  <link rel="stylesheet" href="css/pull-requests.css" />
 </head>
 <body>
   <div id="welcome" hidden>
@@ -22,6 +30,7 @@
       <div class="tabs">
         <button class="tab active" data-tab="changes">Changes <span id="change-count"></span></button>
         <button class="tab" data-tab="history">History</button>
+        <button class="tab" data-tab="prs">Pull Requests <span id="pr-count"></span></button>
       </div>
 
       <section id="changes-view" class="view">
@@ -44,6 +53,35 @@
         <div id="commit-list" tabindex="0"></div>
       </section>
 
+      <section id="prs-view" class="view" hidden>
+        <div class="toolbar" id="pr-toolbar">
+          <span class="toolbar-label">Open pull requests</span>
+          <span class="spacer"></span>
+          <button class="icon-btn" id="pr-refresh" title="Refresh pull requests"><span class="ico" data-icon="refresh"></span></button>
+          <button class="btn" id="pr-new">New Pull Request</button>
+        </div>
+        <div id="pr-list" tabindex="0"></div>
+
+        <div id="pr-form" hidden>
+          <div class="pr-branches">
+            <span class="ico" data-icon="branch"></span>
+            <span id="pr-head"></span>
+            <span class="sep">into</span>
+            <input class="field" id="pr-base" spellcheck="false" title="Base branch" />
+          </div>
+          <input class="field" id="pr-title" placeholder="Title" spellcheck="true" />
+          <textarea class="field" id="pr-body" placeholder="Description (markdown)" spellcheck="true"></textarea>
+          <div id="pr-note"></div>
+          <div class="row">
+            <button class="icon-btn" id="pr-generate"><span class="ico" data-icon="sparkle"></span></button>
+            <label class="check-label"><input type="checkbox" id="pr-draft" /> Draft</label>
+            <span class="spacer"></span>
+            <button class="btn" id="pr-cancel">Cancel</button>
+            <button class="btn primary" id="pr-create" title="Ctrl Enter">Create Pull Request</button>
+          </div>
+        </div>
+      </section>
+
       <footer>
         <div class="row branch-row">
           <button class="ghost" id="repo-btn" title="Switch project (Ctrl P)"></button>
@@ -61,7 +99,7 @@
           <textarea id="msg" placeholder="Enter commit message" spellcheck="true"></textarea>
         </div>
         <div class="row commit-row">
-          <button class="icon-btn" id="generate" title="Generate commit message (Ctrl G)"><span class="ico" data-icon="sparkle"></span></button>
+          <button class="icon-btn" id="generate"><span class="ico" data-icon="sparkle"></span></button>
           <span id="amend-tag" hidden>Amending <button class="link" id="amend-cancel">cancel</button></span>
           <span class="spacer"></span>
           <div class="split">
@@ -90,6 +128,6 @@
   <div id="modal-backdrop" hidden><div id="modal"></div></div>
   <div id="toasts"></div>
 
-  <script src="app.js"></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>

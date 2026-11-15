@@ -1,0 +1,47 @@
+/* Diff pane. */
+
+.diff-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 37px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+}
+#diff-title { overflow: hidden; text-overflow: ellipsis; }
+#diff-body {
+  flex: 1;
+  overflow: auto;
+  font: 12.5px/1.55 var(--mono);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.d-file {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  padding: 4px 10px;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--text-bright);
+  display: flex;
+  gap: 8px;
+}
+.d-file .tag { color: var(--muted); }
+.d-pre { white-space: pre-wrap; padding: 10px 12px; color: var(--text); margin: 0; font: inherit; }
+.d-line { display: flex; white-space: pre; min-width: max-content; }
+.d-line .ln { width: 44px; flex: none; text-align: right; padding-right: 8px; color: var(--dim); }
+.d-line .tx { padding-left: 8px; padding-right: 16px; }
+.d-line.add { background: var(--diff-add-bg); }
+.d-line.add .tx { color: #cfe6ad; }
+.d-line.del { background: var(--diff-del-bg); }
+.d-line.del .tx { color: #f0b3ae; }
+.d-hunk { color: var(--blue); background: rgba(109, 183, 228, 0.06); padding: 2px 12px; white-space: pre; }
+.d-meta { color: var(--muted); padding: 2px 12px; font-style: italic; }

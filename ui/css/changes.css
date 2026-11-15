@@ -1,0 +1,74 @@
+/* Changes tab: file list, status badges, checkboxes. */
+
+#file-list, #commit-list, #pr-list { flex: 1; overflow-y: auto; outline: none; padding-bottom: 8px; }
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px 0 6px;
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+.section-header .chev { color: var(--dim); }
+.section-header .title { flex: 1; cursor: pointer; }
+.section-header .title:hover { color: var(--text); }
+
+.file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px 0 8px;
+  border: 1px solid transparent;
+  cursor: default;
+  white-space: nowrap;
+}
+.file:hover { background: var(--bg-hover); }
+.file.selected { background: var(--bg-sel); border-color: var(--sel-border); }
+#file-list:not(:focus) .file.selected { border-color: transparent; }
+.file .name { color: var(--text-bright); flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+.file.deleted .name { text-decoration: line-through; color: var(--muted); }
+.file .dir {
+  color: var(--dim);
+  font-size: 13px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.file .stats { font: 12px var(--mono); display: flex; gap: 6px; flex: none; }
+.file .stats span { min-width: 0; }
+
+.status-icon { width: 14px; height: 14px; flex: none; }
+.st-M { color: var(--yellow); }
+.st-A, .st-U { color: var(--green); }
+.st-D { color: var(--red); }
+.st-R { color: var(--blue); }
+.st-C { color: var(--orange); }
+
+.check {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bg);
+  margin-left: 4px;
+}
+.check:hover { border-color: var(--sel-border); }
+.check.on, .check.mixed { background: var(--blue); border-color: var(--blue); }
+.check svg { width: 12px; height: 12px; }
+
+.empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--dim);
+}

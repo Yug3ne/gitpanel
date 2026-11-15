@@ -1,0 +1,19 @@
+Write the title and description for a GitHub pull request that merges the
+branch described below.
+
+Reply with the pull request text and nothing else: no preamble, no
+explanation, no surrounding code fence.
+
+Format:
+- Line 1 is the title: plain text (no "#", no "Title:" label, no quotes), in
+  the imperative mood, capitalised, at most about 70 characters, no trailing
+  period. It names the overall change, not one of its commits.
+- Line 2 is blank.
+- The rest is the description, in GitHub markdown. Start with one or two
+  sentences on what the pull request does and why. If the change has several
+  distinct parts, follow with a short bullet list of them. Mention anything a
+  reviewer has to know: behaviour changes, migrations, follow-ups left out.
+- Describe only what the commits and diff show. Don't invent testing steps,
+  issue numbers or motivation that aren't there, and don't paste diff content.
+- Keep it proportionate: a small change gets a couple of sentences, not
+  headings and sections.
