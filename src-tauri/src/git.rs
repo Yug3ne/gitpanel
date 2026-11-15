@@ -6,8 +6,15 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 type Res<T> = Result<T, String>;
+
+/// The `gh` account chosen for each repository root: when it was looked up,
+/// and its `(login, token)` if one with write access was found.
+static GH_ACCOUNTS: OnceLock<Mutex<HashMap<String, (Instant, Option<(String, String)>)>>> = OnceLock::new();
+const GH_ACCOUNT_RETRY: Duration = Duration::from_secs(60);
 
 /// Diffs larger than this are truncated before being sent to the UI.
 const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
@@ -816,10 +823,63 @@ impl Repo {
             .ok_or_else(|| "No remote configured".to_string())
     }
 
+    /// Run `gh` as whichever logged-in account can write to this repository.
     fn gh(&self, args: &[&str], stdin: Option<&str>) -> Res<String> {
+        let account = self.gh_account();
+        self.gh_as(args, stdin, account.as_ref().map(|(_, token)| token.as_str()))
+    }
+
+    /// Pick the `gh` account for this repository. With several accounts
+    /// logged in (personal, work, school…), `gh` itself always uses the
+    /// active one, which may only have read access here. Returns
+    /// `(login, token)`, or `None` to leave the choice to `gh`.
+    fn gh_account(&self) -> Option<(String, String)> {
+        // An explicit token in the environment is the user's own choice.
+        if std::env::var_os("GH_TOKEN").is_some() || std::env::var_os("GITHUB_TOKEN").is_some() {
+            return None;
+        }
+        let cache = GH_ACCOUNTS.get_or_init(Default::default);
+        if let Some((at, account)) = cache.lock().unwrap().get(&self.root) {
+            // A miss is retried after a while: the user may have logged in since.
+            if account.is_some() || at.elapsed() < GH_ACCOUNT_RETRY {
+                return account.clone();
+            }
+        }
+        let account = self.find_gh_account();
+        cache.lock().unwrap().insert(self.root.clone(), (Instant::now(), account.clone()));
+        account
+    }
+
+    fn find_gh_account(&self) -> Option<(String, String)> {
+        let status: serde_json::Value =
+            serde_json::from_str(&self.gh_as(&["auth", "status", "--json", "hosts"], None, None).ok()?).ok()?;
+        let mut accounts: Vec<(bool, String)> = status["hosts"]["github.com"]
+            .as_array()?
+            .iter()
+            .filter(|a| a["state"] == "success")
+            .filter_map(|a| Some((a["active"] == true, a["login"].as_str()?.to_string())))
+            .collect();
+        if accounts.len() < 2 {
+            return None;
+        }
+        // Prefer the active account when it qualifies.
+        accounts.sort_by_key(|(active, _)| !active);
+        accounts.into_iter().find_map(|(_, login)| {
+            let token = self.gh_as(&["auth", "token", "--hostname", "github.com", "--user", &login], None, None).ok()?;
+            let permission = self
+                .gh_as(&["repo", "view", "--json", "viewerPermission", "--jq", ".viewerPermission"], None, Some(&token))
+                .ok()?;
+            ["WRITE", "MAINTAIN", "ADMIN"].contains(&permission.as_str()).then_some((login, token))
+        })
+    }
+
+    fn gh_as(&self, args: &[&str], stdin: Option<&str>, token: Option<&str>) -> Res<String> {
         let bin = find_bin("gh", "GITPANEL_GH")
             .ok_or("Couldn't find the GitHub CLI (`gh`). Install it and run `gh auth login`.")?;
         let mut c = Command::new(bin);
+        if let Some(token) = token {
+            c.env("GH_TOKEN", token);
+        }
         c.args(args)
             .current_dir(&self.root)
             .env("GH_PROMPT_DISABLED", "1")
@@ -945,7 +1005,13 @@ impl Repo {
         if draft {
             args.push("--draft");
         }
-        let out = self.gh(&args, Some(body))?;
+        let out = self.gh(&args, Some(body)).map_err(|e| {
+            if e.contains("must be a collaborator") {
+                format!("{e}\n\nNone of the accounts `gh` is logged in with can write to this repository. Add the one that can with `gh auth login`.")
+            } else {
+                e
+            }
+        })?;
         Ok(out.lines().rev().find(|l| l.starts_with("http")).unwrap_or(&out).to_string())
     }
 
